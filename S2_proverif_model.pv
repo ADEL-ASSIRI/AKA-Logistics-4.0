@@ -1,0 +1,152 @@
+(* ==========================================================================
+   S2 - ProVerif model of the revised three-party AKA for Logistics 4.0
+   Roles: operator device (OD), cloud server (CS), e-tag (ET).
+   Run:   proverif S2_proverif_model.pv
+   Tested syntax target: ProVerif 2.0x
+   Notes
+   - Freshness of M1 is modelled with the challenge (nonce) variant of
+     Section 4.5 (CS sends NC), because ProVerif has no notion of clocks.
+   - Phase 1 reveals ALL long-term secrets (snk, K_T, K_O, i.e. full device
+     capture plus master-key compromise) after the sessions of phase 0 end.
+     Secrecy queries in phase 1 therefore test (perfect) forward secrecy.
+   - Hash halves [h(.)]_L and [h(.)]_R are modelled as two independent
+     functions hL, hR (random-oracle split).
+   - The 128-bit XOR mask W = SK xor [Z_O]_L is modelled as a one-time
+     encryption with a key that only the honest parties can compute.
+   ========================================================================== *)
+
+free c: channel.
+
+type G.
+type exponent.
+
+(* --- elliptic-curve Diffie-Hellman over P-256 ------------------------- *)
+const P: G.
+fun mul(exponent, G): G.
+equation forall x: exponent, y: exponent; mul(x, mul(y, P)) = mul(y, mul(x, P)).
+
+(* --- hash function (random oracle) ------------------------------------ *)
+fun hL(bitstring): bitstring.
+fun hR(bitstring): bitstring.
+fun hK(bitstring): bitstring.          (* K = h(ID || v || snk) *)
+
+(* --- one-time mask and a test cipher used for secrecy queries -------- *)
+fun mask(bitstring, bitstring): bitstring.
+reduc forall m: bitstring, k: bitstring; unmask(mask(m, k), k) = m.
+fun senc(bitstring, bitstring): bitstring.
+reduc forall m: bitstring, k: bitstring; sdec(senc(m, k), k) = m.
+
+(* --- long-term secrets and public pseudonyms -------------------------- *)
+free snk: bitstring [private].
+free IDT: bitstring [private].
+free IDO: bitstring [private].
+free PIDT: bitstring.
+free PIDO: bitstring.
+
+(* private test messages: each party encrypts one under its session key *)
+free secOD: bitstring [private].
+free secET: bitstring [private].
+free secCS: bitstring [private].
+
+(* --- events ----------------------------------------------------------- *)
+event OD_begin(bitstring, G).
+event CS_accept_OD(bitstring, G).
+event CS_begin_ET(bitstring, bitstring, G).
+event ET_accept_CS(bitstring, bitstring, G).
+event ET_begin_CS(G, G, bitstring).
+event CS_accept_ET(G, G, bitstring).
+event CS_begin_OD(G, G, bitstring).
+event OD_accept_CS(G, G, bitstring).
+event CS_confirm_ET(G, bitstring).
+event ET_accept_final(G, bitstring).
+
+(* --- queries: session-key secrecy, before and after full compromise -- *)
+query attacker(secOD).
+query attacker(secET).
+query attacker(secCS).
+query attacker(secOD) phase 1.
+query attacker(secET) phase 1.
+query attacker(secCS) phase 1.
+
+(* --- queries: injective agreement for every authentication step ------ *)
+query x: bitstring, y: G;
+  inj-event(CS_accept_OD(x, y)) ==> inj-event(OD_begin(x, y)).
+query x: bitstring, n: bitstring, y: G;
+  inj-event(ET_accept_CS(x, n, y)) ==> inj-event(CS_begin_ET(x, n, y)).
+query y: G, z: G, k: bitstring;
+  inj-event(CS_accept_ET(y, z, k)) ==> inj-event(ET_begin_CS(y, z, k)).
+query x: G, y: G, k: bitstring;
+  inj-event(OD_accept_CS(x, y, k)) ==> inj-event(CS_begin_OD(x, y, k)).
+query z: G, k: bitstring;
+  inj-event(ET_accept_final(z, k)) ==> inj-event(CS_confirm_ET(z, k)).
+
+(* ------------------------------ E-Tag --------------------------------- *)
+let ETag(KT: bitstring) =
+  new NT: bitstring;
+  out(c, (PIDT, NT));                                    (* M0 *)
+  in(c, (YC: G, V2: bitstring));                         (* M2 *)
+  if V2 = hL((KT, PIDT, NT, YC)) then
+  event ET_accept_CS(PIDT, NT, YC);
+  new t: exponent;
+  let XT = mul(t, P) in
+  let KTC = mul(t, YC) in
+  let ZT = (KT, KTC, PIDT, NT, YC, XT) in
+  let SK = hL(ZT) in
+  event ET_begin_CS(YC, XT, SK);
+  out(c, (XT, hR(ZT)));                                  (* M3 *)
+  in(c, V5: bitstring);                                  (* M5 *)
+  if V5 = hL((KT, SK, XT, NT)) then
+  event ET_accept_final(XT, SK);
+  out(c, senc(secET, SK)).
+
+(* -------------------------- Operator device -------------------------- *)
+let OpDevice(KO: bitstring) =
+  in(c, (pidt: bitstring, nt: bitstring));               (* M0 read from tag *)
+  out(c, PIDO);                                          (* challenge request *)
+  in(c, NC: bitstring);                                  (* challenge *)
+  new a: exponent;
+  let XO = mul(a, P) in
+  event OD_begin(PIDO, XO);
+  out(c, (PIDO, XO, pidt, nt, hL((KO, PIDO, XO, pidt, nt, NC))));   (* M1 *)
+  in(c, (YC: G, W: bitstring, V4: bitstring));           (* M4 *)
+  let KOC = mul(a, YC) in
+  let ZO = (KO, KOC, PIDO, XO, YC, NC) in
+  let SK = unmask(W, hL(ZO)) in
+  if V4 = hL((KO, KOC, SK, W, YC)) then
+  event OD_accept_CS(XO, YC, SK);
+  out(c, senc(secOD, SK)).
+
+(* ---------------------------- Cloud server --------------------------- *)
+let CServer(KO: bitstring, KT: bitstring) =
+  in(c, =PIDO);
+  new NC: bitstring;
+  out(c, NC);
+  in(c, (=PIDO, XO: G, =PIDT, NT: bitstring, V1: bitstring));     (* M1 *)
+  if V1 = hL((KO, PIDO, XO, PIDT, NT, NC)) then
+  event CS_accept_OD(PIDO, XO);
+  new cc: exponent;
+  let YC = mul(cc, P) in
+  event CS_begin_ET(PIDT, NT, YC);
+  out(c, (YC, hL((KT, PIDT, NT, YC))));                  (* M2 *)
+  in(c, (XT: G, V3: bitstring));                         (* M3 *)
+  let KTC = mul(cc, XT) in
+  let ZT = (KT, KTC, PIDT, NT, YC, XT) in
+  if V3 = hR(ZT) then
+  let SK = hL(ZT) in
+  event CS_accept_ET(YC, XT, SK);
+  let KOC = mul(cc, XO) in
+  let ZO = (KO, KOC, PIDO, XO, YC, NC) in
+  let W = mask(SK, hL(ZO)) in
+  event CS_begin_OD(XO, YC, SK);
+  out(c, (YC, W, hL((KO, KOC, SK, W, YC))));             (* M4 *)
+  event CS_confirm_ET(XT, SK);
+  out(c, hL((KT, SK, XT, NT)));                          (* M5 *)
+  out(c, senc(secCS, SK)).
+
+process
+  let KT = hK((IDT, snk)) in
+  let KO = hK((IDO, snk)) in
+  (   (! ETag(KT))
+    | (! OpDevice(KO))
+    | (! CServer(KO, KT))
+    | (phase 1; out(c, (snk, KT, KO, IDT, IDO))) )

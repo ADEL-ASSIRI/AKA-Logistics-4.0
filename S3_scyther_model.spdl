@@ -1,0 +1,97 @@
+/*
+ * S3 - Scyther model of the revised three-party AKA for Logistics 4.0
+ * Roles: OD (operator device), CS (cloud server), ET (e-tag).
+ * Run (GUI or CLI):  scyther-linux --max-runs=6 S3_scyther_model.spdl
+ * Forward secrecy: re-run with the long-term-key-reveal-after-session
+ * adversary option (GUI: Settings > Adversary model > "LKR after claim";
+ * CLI: --LKRafter=1). Secret/SKR claims on SK must remain valid.
+ *
+ * Modelling notes
+ *  - g1(x) models x*P and g2(Y,x) models x*Y on P-256. The helper protocol
+ *    @exponentiation makes g2(g1(x),y) and g2(g1(y),x) interchangeable.
+ *  - k(OD,CS) and k(ET,CS) are the long-term keys K_O and K_T.
+ *  - hL/hR are the left/right halves of SHA-256; the 128-bit mask
+ *    W = SK xor [Z_O]_L is modelled as {SK}hL(Z_O).
+ *  - Freshness of M1 uses the challenge variant (NC); Scyther has no clocks.
+ */
+
+hashfunction g1, g2, hL, hR;
+
+protocol @exponentiation(RA,RB)
+{
+    role RA
+    {
+        var X,Y: Ticket;
+        recv_!1(RA,RA, g2(g1(X),Y) );
+        send_!2(RA,RA, g2(g1(Y),X) );
+    }
+    role RB
+    {
+    }
+}
+
+protocol LogiAKA(OD,CS,ET)
+{
+    role ET
+    {
+        fresh NT: Nonce;
+        fresh t: Nonce;
+        var YC: Ticket;
+
+        send_0(ET,OD, ET, NT);
+        recv_2(CS,ET, YC, hL(k(ET,CS), ET, NT, YC));
+        send_3(ET,CS, g1(t), hR(k(ET,CS), g2(YC,t), ET, NT, YC, g1(t)));
+        recv_5(CS,ET, hL(k(ET,CS), hL(k(ET,CS), g2(YC,t), ET, NT, YC, g1(t)), g1(t), NT));
+
+        claim_ET1(ET, Secret, hL(k(ET,CS), g2(YC,t), ET, NT, YC, g1(t)));
+        claim_ET2(ET, SKR, hL(k(ET,CS), g2(YC,t), ET, NT, YC, g1(t)));
+        claim_ET3(ET, Alive);
+        claim_ET4(ET, Weakagree);
+        claim_ET5(ET, Niagree);
+        claim_ET6(ET, Nisynch);
+    }
+
+    role OD
+    {
+        fresh a: Nonce;
+        var NT, NC: Nonce;
+        var YC, SK: Ticket;
+
+        recv_0(ET,OD, ET, NT);
+        send_1a(OD,CS, OD);
+        recv_1b(CS,OD, NC);
+        send_1(OD,CS, OD, g1(a), ET, NT, hL(k(OD,CS), OD, g1(a), ET, NT, NC));
+        recv_4(CS,OD, YC, {SK}hL(k(OD,CS), g2(YC,a), OD, g1(a), YC, NC),
+                      hL(k(OD,CS), g2(YC,a), SK, YC));
+
+        claim_OD1(OD, Secret, SK);
+        claim_OD2(OD, SKR, SK);
+        claim_OD3(OD, Alive);
+        claim_OD4(OD, Weakagree);
+        claim_OD5(OD, Niagree);
+        claim_OD6(OD, Nisynch);
+    }
+
+    role CS
+    {
+        fresh NC: Nonce;
+        fresh c: Nonce;
+        var NT: Nonce;
+        var XO, XT: Ticket;
+
+        recv_1a(OD,CS, OD);
+        send_1b(CS,OD, NC);
+        recv_1(OD,CS, OD, XO, ET, NT, hL(k(OD,CS), OD, XO, ET, NT, NC));
+        send_2(CS,ET, g1(c), hL(k(ET,CS), ET, NT, g1(c)));
+        recv_3(ET,CS, XT, hR(k(ET,CS), g2(XT,c), ET, NT, g1(c), XT));
+        send_4(CS,OD, g1(c),
+               {hL(k(ET,CS), g2(XT,c), ET, NT, g1(c), XT)}hL(k(OD,CS), g2(XO,c), OD, XO, g1(c), NC),
+               hL(k(OD,CS), g2(XO,c), hL(k(ET,CS), g2(XT,c), ET, NT, g1(c), XT), g1(c)));
+        send_5(CS,ET, hL(k(ET,CS), hL(k(ET,CS), g2(XT,c), ET, NT, g1(c), XT), XT, NT));
+
+        claim_CS1(CS, Secret, hL(k(ET,CS), g2(XT,c), ET, NT, g1(c), XT));
+        claim_CS2(CS, SKR, hL(k(ET,CS), g2(XT,c), ET, NT, g1(c), XT));
+        claim_CS3(CS, Alive);
+        claim_CS4(CS, Weakagree);
+    }
+}
