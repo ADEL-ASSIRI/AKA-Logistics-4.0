@@ -1,151 +1,17 @@
-# AKA-Logistics-4.0
-# Logistics 4.0 Three-Party Authentication Protocol - Testbed Implementation
+# Supplementary Files S1–S4
+*Provably Secure Three-Party Authentication for Logistics 4.0* (revised version)
 
-[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
-[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows%20%7C%20macOS-lightgrey.svg)]()
+| File | Content | Command | Expected result |
+|---|---|---|---|
+| S1_reference_implementation.py | Executable specification of the revised protocol (Python ≥ 3.9, `pip install cryptography`) | `python3 S1_reference_implementation.py` | Every line starts with `[ok]`; the last line reports message sizes `[256, 808, 392, 392, 520, 128] total = 2496` |
+| S2_proverif_model.pv | ProVerif model (challenge mode, phase-1 compromise of `snk`, `K_T`, `K_O`) | `proverif S2_proverif_model.pv` | All `attacker(...)` queries (phase 0 and phase 1) and all five `inj-event` queries report `true` (Table 8) |
+| S3_scyther_model.spdl | Scyther model with the standard Diffie–Hellman helper protocol | Scyther GUI: *Verify → Verify protocol*; repeat with *Settings → Adversary model → long-term key reveal after claim* (CLI `--LKRafter=1`) | All claims `Ok` (Table 9) |
+| S4_evaluation.py | Computes every number in Tables 12–19 and draws Figures 4–10 | `python3 S4_evaluation.py figs` (needs matplotlib) ; `python3 S4_evaluation.py --bench` for a host micro-benchmark | JSON with the values printed in the paper; PDF figures in `figs/` |
 
----
+## What each part of the paper relies on
+* Correctness of the message flow (Section 4.4, Table 6): S1.
+* Symbolic secrecy, injective agreement and forward secrecy (Sections 5.3–5.4): S2, S3.
+* All performance numbers (Section 6): S4, with the per-operation timings of Table 11 as the only measured input. To re-measure on your own devices, replace the dictionary `T` at the top of S4 and rerun it.
 
-## Overview
-
-This repository contains the complete testbed implementation of the **Three-Party Mutual Authentication Scheme for Logistics 4.0** as described in the manuscript:
-
-> **"A Mutual Authentication Scheme for Logistics 4.0 with Provable Security"**
-> *(Under Review at Elsevier)*
-
-The implementation demonstrates a lightweight, provably secure authentication protocol for Logistics 4.0 environments, supporting mutual authentication between three entities: **User (Operator Device)**, **Cloud Server**, and **E-Tag** in a single session.
-
-
----
-
-## Key Features
-
-| Feature | Description |
-|---------|-------------|
-| **Three-Party Authentication** | User-Cloud Server-E-Tag mutual authentication |
-| **Lightweight Design** | Only 3 ECC operations per session |
-| **Dynamic Key Management** | Key update and revocation without re-registration |
-| **Provable Security** | RoR, ProVerif, Scyther, BAN Logic verification |
-| **Performance Optimized** | 16.87 ms computation, 2432 bits communication |
-| **Energy Efficient** | 183.55 mJ per session |
-
----
-
-## Installation
-
-### Prerequisites
-
-- Python 3.8 or higher
-- pip (Python package manager)
-
-### Setup Instructions
-
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/logistics40-authentication.git
-cd logistics40-authentication
-
-# Create and activate virtual environment (recommended)
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-numpy>=1.21.0
-matplotlib>=3.4.0
-pandas>=1.3.0
-
-
-╔═══════════════════════════════════════════════════════════════════╗
-║     Logistics 4.0 Three-Party Authentication Protocol Testbed      ║
-║                        Version 1.0                                 ║
-╚═══════════════════════════════════════════════════════════════════╝
-
-PHASE 1: REGISTRATION
-============================================================
-[CS-MAIN] Initialized with ECC keys
-[ET-ET_001] Registration successful
-[OD-OP_001] Registration successful
-
-PHASE 2: AUTHENTICATION (100 sessions)
-============================================================
-  Progress: 20/100 sessions
-  Progress: 40/100 sessions
-  Progress: 60/100 sessions
-  Progress: 80/100 sessions
-  Progress: 100/100 sessions
-
-PHASE 3: KEY UPDATE AND RE-AUTHENTICATION
-============================================================
-[OD-OP_001] Key updated successfully
-[ET-ET_001] Key updated successfully
-
-PERFORMANCE REPORT
-============================================================
-┌─────────────────────────────────────────────────────────────────┐
-│                    PROTOCOL PERFORMANCE SUMMARY                  │
-├─────────────────────────────────────────────────────────────────┤
-│ Total Sessions:           100                                  │
-│ Successful Sessions:      99                                   │
-│ Success Rate:             99.00%                               │
-│ Average Auth Time:        16.87 ms                             │
-│ Communication Overhead:   2432 bits                            │
-│ Energy per Session:       183.55 mJ                            │
-└─────────────────────────────────────────────────────────────────┘
-
-proverif ProVerif_Code.pv
-
-Query not attacker(SKTE[]) is true.
-Query not attacker(SKCS[]) is true.
-Query not attacker(SKO[]) is true.
-Query inj-event(ODEnd(id)) ==> inj-event(ODStart(id)) is true.
-Query inj-event(CSEnd(id)) ==> inj-event(CSStart(id)) is true.
-Query inj-event(TEnd(id)) ==> inj-event(TStart(id)) is true.
-
-Step 1: User → Cloud Server
-   O3 = C7 ⊕ h(IDO || r5)
-   O4 = IDO ⊕ h(O3 || C7 || r5)
-
-Step 2: Cloud Server → E-Tag
-   C11 = h(C8 || C9 || r5 || r6) ⊕ C7
-   C12 = h(C10 || C11 || r5 || r6) ⊕ C2
-
-Step 3: E-Tag → Cloud Server
-   SKT = h(A3 || A4 || r1)
-   A5 = h(SKT || A2 || A3)
-
-Step 4: Cloud Server → User
-   SKC = h(C13 || C14 || r1)
-   C15 = h(SKC || C2 || C13)
-
-Step 5: User
-   SKO = h(O5 || O6 || r1)
-
-class ETag:          # E-Tag entity
-class OperatorDevice # Operator Device entity  
-class CloudServer    # Cloud Server entity
-
-sha256_hash()        # SHA-256 hash function
-xor_operation()      # XOR operation on hex strings
-generate_random_nonce() # Random nonce generation
-generate_ecc_keypair()  # ECC key pair simulation
-
-PerformanceMetrics   # Collects timing and overhead data
-generate_report()    # Generates performance report
-plot_comparison()    # Visualizes comparison results
-
-Logistics40Testbed   # Complete testbed class
-  - run_registration_phase()
-  - run_authentication_batch()
-  - run_key_update_phase()
-  - run_full_testbed()
-
-@article{assiri2026logistics,
-  title={A Mutual Authentication Scheme for Logistics 4.0 with Provable Security},
-  author={Assiri, Adel Saad and, Elaf Ali},
-  journal={Elsevier},
-  year={2026},
-  note={Under Review}
-}
+## Recommended versions
+ProVerif 2.05, Scyther v1.1.3, Python 3.12, cryptography 46, matplotlib 3.x, MIRACL Core v7.0 (device benchmarks).
